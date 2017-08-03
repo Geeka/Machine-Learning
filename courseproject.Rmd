@@ -1,0 +1,135 @@
+---
+title: "Practical Machine learning course project"
+author: "Geetha K S"
+date: "August 3, 2017"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Preparing the environment
+The required libraries were loaded. We also set the seed for the environment
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+library(rpart)
+library(rattle)
+library(randomForest)
+library(doParallel)
+
+set.seed(12345)
+```
+
+## Data Importing
+The data was read from the urls and NAs removed while importing
+
+
+```{r}
+trainurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testurl<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(trainurl,na.strings = c("NA","#DIV/0!",""))
+testing<-read.csv(testurl,na.strings = c("NA","#DIV/0!",""))
+```
+## Data Cleaning
+Removed the missing values NAs from the data
+```{r}
+trNAs <-colMeans(is.na(training))
+training_noNAs<-training[!trNAs]
+dim(training_noNAs)
+```
+The following columns were removed from the predictor list by intuition as these do not contribute towards the outcome variable classe:
+
+X,user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp,new_window,num_window
+
+```{r}
+training_useful <- training_noNAs[-(1:7)]
+dim(training_useful)
+feature_set<-colnames(training_useful)
+```
+
+## Data Partioning
+For doing cross validation, the data was split into training and testing data with 70% of the data contributing to training
+```{r}
+inTrain = createDataPartition(training_useful$classe, p = 0.7,list=FALSE)
+train_part = training_useful[ inTrain,]
+test_part = training_useful[-inTrain,]
+dim(train_part)
+dim(test_part)
+```
+## Decision trees
+Here , we try to fit a decision tree model and check the accuracy.The data was trained to predict the variable classe.Cross validation method with k=5 was used.
+
+```{r}
+fitcontrol<-trainControl(method="cv",number = 5)
+modFitrpart<-train(classe~.,method="rpart",data=train_part)
+modFitrpart
+```
+
+We can visualize the decision tree by plotting as below
+```{r}
+fancyRpartPlot(modFitrpart$finalModel)
+```
+
+Predicting this model on the validation data, we get the statistics as follows
+```{r}
+predrpart <- predict(modFitrpart, newdata =test_part[,1:52])
+confusionMatrix( predrpart,test_part$classe)
+```
+
+From the above we see that the accuracy is very low for predicting on the evaluation data, so this method will not be used
+
+## Random Forest
+Now, we try to fit the random forest algorithm to build the model.The number of trees were set as 1000. Parallel processing was used to cut down the execution time. The variable classe was predicted based on the reamaining 52 predictors.
+```{r}
+registerDoParallel()
+rf<-foreach(ntree=rep(250,4),.combine = randomForest::combine,.packages = "randomForest") %dopar%{
+  randomForest(train_part[,-53],train_part$classe,ntree=ntree)
+}
+rf
+```
+The above model was used on the validation data to predict the known outcome. To check the accuracy of prediction, confusionmatrix was obtained
+```{r}
+predrf <- predict(rf, newdata =test_part[,1:52])
+confusionMatrix(predrf, test_part$classe)
+```
+
+We see from the above result that the accuracy is very high. So this method will be used on the evaluation data
+
+## Variable Importance
+From the above prediction model, we can see the 20 most important variables in their order of importance
+```{r}
+varimp<-varImp(rf)
+vars<-rownames(varimp)[order(varimp$Overall, decreasing=TRUE)]
+vars[1:20]
+
+```
+
+## Visualize the variable importance
+We can see the most important variables and their strengths from the following plot
+```{r}
+qplot(rownames(varimp),varimp$Overall,
+      geom=c("col"))+coord_flip()+theme(text = element_text(size=10))+
+  xlab("Vaiables")+ylab("Importance")
+```
+
+## Prediction on the out of sample data
+We applied the prediction model on the evaluation data. We got 100 % accuracy on the prediction quiz
+
+```{r}
+testing_useful<-testing[feature_set[-53]]
+predict(rf,newdata = testing_useful)
+```
+
